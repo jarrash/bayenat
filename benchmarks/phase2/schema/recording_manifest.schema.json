@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bayenat.local/schemas/phase2/recording_manifest.schema.json",
+  "title": "Bayenat Phase 2 Recording Manifest",
+  "type": "object",
+  "required": ["manifest_version", "corpus_id", "corpus_version", "recordings"],
+  "properties": {
+    "manifest_version": { "type": "string", "const": "1.0.0" },
+    "corpus_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]+$" },
+    "corpus_version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "created_by_role": { "type": "string", "enum": ["CORPUS_CUSTODIAN", "DATA_GOVERNANCE_OWNER"] },
+    "recordings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/recording" }
+    }
+  },
+  "$defs": {
+    "recording": {
+      "type": "object",
+      "required": ["recording_id", "speaker_id", "consent_id", "rights_status", "audio", "language", "dialect", "scenario", "annotation", "split_eligibility"],
+      "properties": {
+        "recording_id": { "type": "string", "pattern": "^rec_[a-zA-Z0-9_-]+$" },
+        "speaker_id": { "type": "string", "pattern": "^spk_[a-zA-Z0-9_-]+$" },
+        "consent_id": { "type": "string", "pattern": "^cons_[a-zA-Z0-9_-]+$" },
+        "rights_status": { "type": "string", "enum": ["AUTHORIZED_PRIVATE", "AUTHORIZED_RESEARCH", "WITHDRAWN", "QUARANTINED"] },
+        "audio": {
+          "type": "object",
+          "required": ["relative_path", "sha256", "duration_ms", "sample_rate_hz", "channels", "capture_condition"],
+          "properties": {
+            "relative_path": { "type": "string", "pattern": "^(audio|quarantine)/[^/]+\\.(wav|flac|mp3|m4a)$" },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "duration_ms": { "type": "integer", "minimum": 1000 },
+            "sample_rate_hz": { "type": "integer", "enum": [8000, 16000, 22050, 44100, 48000] },
+            "channels": { "type": "integer", "minimum": 1, "maximum": 2 },
+            "capture_condition": { "type": "string", "enum": ["CLEAN_CLOSE_MIC", "FAR_FIELD", "TELEPHONE_LIKE", "NOISY", "REVERBERANT", "OVERLAP"] },
+            "device_class": { "type": "string", "enum": ["HEADSET", "PHONE", "LAPTOP", "ROOM_MIC", "UNKNOWN"] }
+          },
+          "additionalProperties": false
+        },
+        "language": { "type": "string", "enum": ["ar", "ar-en", "en"] },
+        "dialect": { "type": "string", "enum": ["SAUDI_GULF", "MSA_FORMAL", "EGYPTIAN", "LEVANTINE", "OTHER", "UNKNOWN"] },
+        "speaker": {
+          "type": "object",
+          "required": ["age_band", "gender_self_reported", "dialect_basis"],
+          "properties": {
+            "age_band": { "type": "string", "enum": ["18_29", "30_44", "45_59", "60_PLUS", "WITHHELD"] },
+            "gender_self_reported": { "type": "string", "enum": ["FEMALE", "MALE", "NON_BINARY", "WITHHELD"] },
+            "dialect_basis": { "type": "string", "enum": ["SELF_REPORTED", "ANNOTATOR_CONFIRMED", "MIXED", "UNKNOWN"] }
+          },
+          "additionalProperties": false
+        },
+        "scenario": {
+          "type": "object",
+          "required": ["register", "content_tags", "prompt_id"],
+          "properties": {
+            "register": { "type": "string", "enum": ["CONVERSATIONAL", "READ", "PROMPTED_SPONTANEOUS", "PAIRED_DIALOGUE"] },
+            "content_tags": { "type": "array", "items": { "type": "string", "enum": ["NEGATION", "NUMBER", "DATE", "CURRENCY", "PERSON_NAME", "ORG_NAME", "LEGAL", "TECHNICAL", "CODE_SWITCH"] }, "uniqueItems": true },
+            "prompt_id": { "type": "string", "pattern": "^prompt_[a-zA-Z0-9_-]+$" }
+          },
+          "additionalProperties": false
+        },
+        "annotation": {
+          "type": "object",
+          "required": ["reference_transcript_path", "normalized_transcript_path", "annotator_ids", "adjudicated", "critical_token_reviewed"],
+          "properties": {
+            "reference_transcript_path": { "type": "string", "pattern": "^annotations/[^/]+\\.json$" },
+            "normalized_transcript_path": { "type": "string", "pattern": "^annotations/[^/]+\\.normalized\\.json$" },
+            "annotator_ids": { "type": "array", "minItems": 2, "items": { "type": "string" }, "uniqueItems": true },
+            "adjudicated": { "type": "boolean" },
+            "critical_token_reviewed": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "split_eligibility": {
+          "type": "object",
+          "required": ["eligible", "exclusion_reasons"],
+          "properties": {
+            "eligible": { "type": "boolean" },
+            "exclusion_reasons": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

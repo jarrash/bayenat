@@ -1,0 +1,47 @@
+{
+  "manifest_version": "1.0.0",
+  "corpus_id": "bayenat_phase2_pilot",
+  "corpus_version": "v0.1.0",
+  "created_at": "2026-08-16T00:00:00Z",
+  "created_by_role": "CORPUS_CUSTODIAN",
+  "recordings": [
+    {
+      "recording_id": "rec_example_001",
+      "speaker_id": "spk_example_001",
+      "consent_id": "cons_example_001",
+      "rights_status": "AUTHORIZED_PRIVATE",
+      "audio": {
+        "relative_path": "audio/rec_example_001.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duration_ms": 240000,
+        "sample_rate_hz": 16000,
+        "channels": 1,
+        "capture_condition": "CLEAN_CLOSE_MIC",
+        "device_class": "PHONE"
+      },
+      "language": "ar-en",
+      "dialect": "SAUDI_GULF",
+      "speaker": {
+        "age_band": "30_44",
+        "gender_self_reported": "WITHHELD",
+        "dialect_basis": "SELF_REPORTED"
+      },
+      "scenario": {
+        "register": "PROMPTED_SPONTANEOUS",
+        "content_tags": ["NEGATION", "NUMBER", "LEGAL", "CODE_SWITCH"],
+        "prompt_id": "prompt_example_001"
+      },
+      "annotation": {
+        "reference_transcript_path": "annotations/rec_example_001.json",
+        "normalized_transcript_path": "annotations/rec_example_001.normalized.json",
+        "annotator_ids": ["ann_example_001", "ann_example_002"],
+        "adjudicated": true,
+        "critical_token_reviewed": true
+      },
+      "split_eligibility": {
+        "eligible": true,
+        "exclusion_reasons": []
+      }
+    }
+  ]
+}

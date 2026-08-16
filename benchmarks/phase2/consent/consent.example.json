@@ -1,0 +1,27 @@
+{
+  "consent_id": "cons_example_001",
+  "speaker_id": "spk_example_001",
+  "consent_version": "v1.0",
+  "consent_basis": "VOLUNTARY_SIGNED_CONSENT",
+  "consent_locale": "ar-en",
+  "purposes": ["ASR_EVALUATION", "ALIGNMENT_EVALUATION", "CONSENSUS_EVALUATION", "ERROR_ANALYSIS"],
+  "automated_processing": true,
+  "multi_engine_comparison": true,
+  "human_review": true,
+  "model_training_allowed": false,
+  "deidentified_derivatives_allowed": false,
+  "raw_audio_sharing_allowed": false,
+  "retention": {
+    "retention_until": "2027-08-16",
+    "private_benchmark_only": true,
+    "early_deletion_on_withdrawal": true
+  },
+  "withdrawal": {
+    "contact_channel": "privacy@bayenat.example",
+    "removal_policy": "REMOVE_FROM_FUTURE_RELEASES_AND_DELETE_RAW"
+  },
+  "status": "ACTIVE",
+  "approved_by_role": "DATA_GOVERNANCE_OWNER",
+  "signed_at": "2026-08-16T00:00:00Z",
+  "source_record_uri": "restricted://consent/cons_example_001"
+}

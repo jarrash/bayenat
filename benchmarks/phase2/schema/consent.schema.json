@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bayenat.local/schemas/phase2/consent.schema.json",
+  "title": "Bayenat Phase 2 Consent Metadata",
+  "type": "object",
+  "required": ["consent_id", "speaker_id", "consent_version", "consent_basis", "purposes", "automated_processing", "human_review", "retention", "withdrawal", "status", "approved_by_role"],
+  "properties": {
+    "consent_id": { "type": "string", "pattern": "^cons_[a-zA-Z0-9_-]+$" },
+    "speaker_id": { "type": "string", "pattern": "^spk_[a-zA-Z0-9_-]+$" },
+    "consent_version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+$" },
+    "consent_basis": { "type": "string", "enum": ["VOLUNTARY_SIGNED_CONSENT", "VOLUNTARY_RECORDED_CONSENT", "AUTHORIZED_ORGANIZATIONAL_PROVISION"] },
+    "consent_locale": { "type": "string", "enum": ["ar", "en", "ar-en"] },
+    "purposes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["ASR_EVALUATION", "ALIGNMENT_EVALUATION", "CONSENSUS_EVALUATION", "HUMAN_ANNOTATION_TRAINING", "ERROR_ANALYSIS"] },
+      "uniqueItems": true
+    },
+    "automated_processing": { "type": "boolean", "const": true },
+    "multi_engine_comparison": { "type": "boolean", "const": true },
+    "human_review": { "type": "boolean", "const": true },
+    "model_training_allowed": { "type": "boolean", "const": false },
+    "deidentified_derivatives_allowed": { "type": "boolean" },
+    "raw_audio_sharing_allowed": { "type": "boolean", "const": false },
+    "retention": {
+      "type": "object",
+      "required": ["retention_until", "private_benchmark_only"],
+      "properties": {
+        "retention_until": { "type": "string", "format": "date" },
+        "private_benchmark_only": { "type": "boolean", "const": true },
+        "early_deletion_on_withdrawal": { "type": "boolean", "const": true }
+      },
+      "additionalProperties": false
+    },
+    "withdrawal": {
+      "type": "object",
+      "required": ["contact_channel", "removal_policy"],
+      "properties": {
+        "contact_channel": { "type": "string", "minLength": 1 },
+        "removal_policy": { "type": "string", "enum": ["REMOVE_FROM_FUTURE_RELEASES_AND_DELETE_RAW", "CASE_BY_CASE_REVIEW"] }
+      },
+      "additionalProperties": false
+    },
+    "status": { "type": "string", "enum": ["ACTIVE", "WITHDRAWN", "EXPIRED", "QUARANTINED"] },
+    "approved_by_role": { "type": "string", "enum": ["DATA_GOVERNANCE_OWNER", "AUTHORIZED_ORGANIZATIONAL_PROVISIONER"] },
+    "signed_at": { "type": "string", "format": "date-time" },
+    "source_record_uri": { "type": "string", "description": "Restricted internal URI; never a public URL." }
+  },
+  "additionalProperties": false
+}
