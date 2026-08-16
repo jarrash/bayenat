@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-development"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
+    stt_model_name: str = "large-v3"
+    stt_device: str = "cpu"
+    stt_compute_type: str = "int8"
+    stt_default_language: str = "ar"
+    stt_model_version: str | None = None
+    stt_download_root: str | None = None
+    stt_configuration_version: str = "v1"
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="BAYENAT_", extra="ignore")
 
