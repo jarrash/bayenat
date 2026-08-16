@@ -1,0 +1,8 @@
+{
+  "recording_id": "rec_ci_001",
+  "text": "لم يتم اعتماد شركة بيان",
+  "critical_items": [
+    {"item_id": "neg_ci_001", "type": "NEGATION", "reference_text": "لم يتم", "required_tokens": ["لم"], "forbidden_tokens": ["تم"]},
+    {"item_id": "name_ci_001", "type": "NAME", "reference_text": "شركة بيان"}
+  ]
+}

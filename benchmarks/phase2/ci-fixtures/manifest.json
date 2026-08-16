@@ -1,0 +1,62 @@
+{
+  "manifest_version": "1.0.0",
+  "corpus_id": "bayenat_ci_smoke",
+  "corpus_version": "v0.1.0",
+  "created_by_role": "CORPUS_CUSTODIAN",
+  "recordings": [
+    {
+      "recording_id": "rec_ci_001",
+      "speaker_id": "spk_ci_001",
+      "consent_id": "cons_ci_001",
+      "rights_status": "AUTHORIZED_PRIVATE",
+      "split": "test",
+      "audio": {
+        "relative_path": "audio/rec_ci_001.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duration_ms": 1000,
+        "sample_rate_hz": 16000,
+        "channels": 1,
+        "capture_condition": "CLEAN_CLOSE_MIC"
+      },
+      "language": "ar",
+      "dialect": "SAUDI_GULF",
+      "speaker": {"age_band": "30_44", "gender_self_reported": "WITHHELD", "dialect_basis": "SELF_REPORTED"},
+      "scenario": {"register": "CONVERSATIONAL", "content_tags": ["NEGATION", "PERSON_NAME"], "prompt_id": "prompt_ci_001"},
+      "annotation": {
+        "reference_transcript_path": "annotations/rec_ci_001.json",
+        "normalized_transcript_path": "annotations/rec_ci_001.normalized.json",
+        "annotator_ids": ["ann_ci_001", "ann_ci_002"],
+        "adjudicated": true,
+        "critical_token_reviewed": true
+      },
+      "split_eligibility": {"eligible": true, "exclusion_reasons": []}
+    },
+    {
+      "recording_id": "rec_ci_002",
+      "speaker_id": "spk_ci_002",
+      "consent_id": "cons_ci_002",
+      "rights_status": "AUTHORIZED_PRIVATE",
+      "split": "challenge",
+      "audio": {
+        "relative_path": "audio/rec_ci_002.wav",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "duration_ms": 1000,
+        "sample_rate_hz": 16000,
+        "channels": 1,
+        "capture_condition": "NOISY"
+      },
+      "language": "ar-en",
+      "dialect": "SAUDI_GULF",
+      "speaker": {"age_band": "45_59", "gender_self_reported": "WITHHELD", "dialect_basis": "SELF_REPORTED"},
+      "scenario": {"register": "PROMPTED_SPONTANEOUS", "content_tags": ["NUMBER", "PERSON_NAME"], "prompt_id": "prompt_ci_002"},
+      "annotation": {
+        "reference_transcript_path": "annotations/rec_ci_002.json",
+        "normalized_transcript_path": "annotations/rec_ci_002.normalized.json",
+        "annotator_ids": ["ann_ci_001", "ann_ci_002"],
+        "adjudicated": true,
+        "critical_token_reviewed": true
+      },
+      "split_eligibility": {"eligible": true, "exclusion_reasons": []}
+    }
+  ]
+}

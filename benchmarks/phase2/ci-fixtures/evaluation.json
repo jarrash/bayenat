@@ -1,0 +1,13 @@
+{
+  "engine": {"name": "ci-mock", "model_family": "fixture", "model": "deterministic-v1"},
+  "recordings": [
+    {
+      "recording_id": "rec_ci_001",
+      "text": "لم يتم اعتماد شركة بيان"
+    },
+    {
+      "recording_id": "rec_ci_002",
+      "text": "تم إرسال الملف إلى شركة Bayenat"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "recording_id": "rec_ci_002",
+  "text": "تم إرسال الملف إلى شركة Bayenat",
+  "critical_items": [
+    {"item_id": "name_ci_002", "type": "NAME", "reference_text": "شركة Bayenat"}
+  ]
+}

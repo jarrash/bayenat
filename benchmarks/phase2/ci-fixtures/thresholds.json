@@ -1,0 +1,5 @@
+{
+  "normalized_wer_max": 0.18,
+  "negation_accuracy_min": 0.98,
+  "critical_name_accuracy_min": 0.95
+}

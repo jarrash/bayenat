@@ -61,3 +61,9 @@ python3 benchmarks/phase2/tools/evaluate_asr.py \
 The result reports micro-aggregated normalized WER, negation accuracy, critical-name accuracy, per-recording WER, and item-level outcomes. Normalization is deliberately conservative: it removes diacritics, tatweel, punctuation, and spacing variation, maps common Alef variants and `ى`, and converts Arabic/Persian digits, but it does not map `ة` to `ه`, remove negation, or rewrite grammar.
 
 The negation metric is a polarity-preservation check, not a complete semantic entailment metric. The critical-name metric requires the normalized reference name phrase to occur contiguously in the normalized hypothesis. Both metrics require careful reference annotation and should be reported with item counts and error examples.
+
+## Pull-request CI
+
+Every pull request that changes `benchmarks/phase2/**` runs `.github/workflows/asr-evaluator.yml`. The workflow validates the committed fixture manifest, runs all evaluator tests, evaluates the deterministic CI fixture, enforces the configured WER/negation/name thresholds, runs Ruff, writes metrics to the GitHub Actions job summary, and uploads the JSON metrics artifact for 14 days.
+
+The CI fixture is a **contract test**, not an accuracy claim about a speech model. It intentionally uses text-only deterministic output so pull requests do not download multi-gigabyte models or require GPU hardware. Real model evaluation belongs in a separately governed benchmark job after the corpus and model environment are available. Threshold changes must be reviewed as benchmark-policy changes, not hidden inside implementation code.

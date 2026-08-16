@@ -1,0 +1,84 @@
+name: Bayenat ASR evaluator
+
+on:
+  pull_request:
+    paths:
+      - "benchmarks/phase2/**"
+      - ".github/workflows/asr-evaluator.yml"
+  push:
+    branches: [main]
+    paths:
+      - "benchmarks/phase2/**"
+      - ".github/workflows/asr-evaluator.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asr-evaluator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asr-evaluator:
+    name: ASR evaluator smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install lightweight CI dependencies
+        run: python -m pip install --upgrade pip pytest ruff
+
+      - name: Validate fixture manifest
+        run: python benchmarks/phase2/tools/validate_manifest.py benchmarks/phase2/ci-fixtures/manifest.json
+
+      - name: Run evaluator tests
+        env:
+          PYTHONPATH: benchmarks/phase2/tools
+        run: python -m pytest -q benchmarks/phase2/tests
+
+      - name: Run benchmark evaluator
+        env:
+          PYTHONPATH: benchmarks/phase2/tools
+        run: >-
+          python benchmarks/phase2/tools/evaluate_asr.py
+          --manifest benchmarks/phase2/ci-fixtures/manifest.json
+          --evaluation benchmarks/phase2/ci-fixtures/evaluation.json
+          --root benchmarks/phase2/ci-fixtures
+          --output asr-metrics.json
+
+      - name: Enforce evaluator thresholds
+        run: >-
+          python benchmarks/phase2/tools/check_thresholds.py
+          asr-metrics.json
+          --thresholds benchmarks/phase2/ci-fixtures/thresholds.json
+
+      - name: Check benchmark tooling style
+        run: ruff check benchmarks/phase2/tools benchmarks/phase2/tests
+
+      - name: Publish metrics to job summary
+        if: always()
+        run: |
+          {
+            echo "## Bayenat ASR evaluator"
+            echo
+            echo '```json'
+            if [ -f asr-metrics.json ]; then cat asr-metrics.json; else echo '{"status":"not generated"}'; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evaluator metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bayenat-asr-metrics-${{ github.sha }}
+          path: asr-metrics.json
+          if-no-files-found: warn
+          retention-days: 14
