@@ -5,7 +5,7 @@ import mimetypes
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,10 +13,16 @@ from app.core.config import get_settings
 from app.db.models import ArtifactType, AuditEvent, AuditEventType, Case, Evidence, EvidenceArtifact, JobStatus, ProcessingJob, Tenant, User
 from app.db.session import get_db
 from app.schemas.api import CaseCreate, CaseRead, EvidenceRead, IntegrityRead, JobRead
+from app.schemas.transcription import JobEventRead, StreamCreate, StreamCreated, TranscriptionSubmit, WebSocketClientMessage
+from app.services.job_events import JobEventHub
+from app.services.transcription_jobs import InMemoryJobQueue, JobKind, JobStatus as QueueJobStatus, TranscriptionJob
 from app.services.integrity import audit_event_hash, sha256_file
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0", description="Evidence transcription and verification API")
+app.state.job_queue = InMemoryJobQueue()
+app.state.event_hub = JobEventHub()
+app.state.streams = {}
 
 ALLOWED_MEDIA_TYPES = {
     "audio/wav",
@@ -135,19 +141,24 @@ def upload_evidence(case_id: uuid.UUID, file: UploadFile = File(...), db: Sessio
 
 
 @app.post(f"{settings.api_prefix}/evidence/{{evidence_id}}/transcribe", response_model=JobRead, status_code=status.HTTP_202_ACCEPTED)
-def submit_transcription(evidence_id: uuid.UUID, db: Session = Depends(get_db)) -> ProcessingJob:
+async def submit_transcription(evidence_id: uuid.UUID, payload: TranscriptionSubmit | None = None, db: Session = Depends(get_db)) -> ProcessingJob:
     tenant, _ = _default_principal(db)
     evidence = db.scalar(select(Evidence).where(Evidence.id == evidence_id, Evidence.tenant_id == tenant.id))
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
-    key = hashlib.sha256(f"{evidence.sha256}:arabic_forensic:v1".encode()).hexdigest()
+    request = payload or TranscriptionSubmit()
+    profile = request.profile
+    key_material = request.idempotency_key or f"{evidence.sha256}:{profile}:{','.join(request.engine_names)}:{request.language}"
+    key = hashlib.sha256(key_material.encode()).hexdigest()
     existing = db.scalar(select(ProcessingJob).where(ProcessingJob.evidence_id == evidence.id, ProcessingJob.idempotency_key == key))
     if existing is not None:
         return existing
-    job = ProcessingJob(tenant_id=tenant.id, evidence_id=evidence.id, idempotency_key=key, status=JobStatus.QUEUED)
+    job = ProcessingJob(tenant_id=tenant.id, evidence_id=evidence.id, idempotency_key=key, status=JobStatus.QUEUED, processing_profile=profile, metadata_json={"language": request.language, "engine_names": request.engine_names})
     db.add(job)
     db.commit()
     db.refresh(job)
+    await app.state.job_queue.enqueue(TranscriptionJob(job_id=str(job.id), kind=JobKind.BATCH, tenant_id=str(tenant.id), evidence_id=str(evidence.id), audio_path=str(Path(settings.storage_root) / evidence.storage_uri), language=request.language, profile=profile, engine_names=tuple(request.engine_names)))
+    await app.state.event_hub.publish_status(str(job.id), QueueJobStatus.QUEUED.value, 0, "Transcription job queued")
     return job
 
 
@@ -180,3 +191,87 @@ def verify_integrity(evidence_id: uuid.UUID, db: Session = Depends(get_db)) -> I
             break
         previous = event.event_hash
     return IntegrityRead(original_file_valid=original_valid, artifact_chain_valid=artifact_valid, audit_chain_valid=audit_valid)
+
+
+@app.get(f"{settings.api_prefix}/jobs/{{job_id}}/events", response_model=list[JobEventRead])
+async def list_job_events(job_id: uuid.UUID, after_event_id: int = Query(default=0, ge=0)) -> list[JobEventRead]:
+    return await app.state.event_hub.replay(str(job_id), after_event_id)
+
+
+@app.websocket(f"{settings.api_prefix}/jobs/{{job_id}}/events/ws")
+async def job_events_websocket(websocket: WebSocket, job_id: uuid.UUID) -> None:
+    await websocket.accept()
+    after_event_id = int(websocket.query_params.get("after_event_id", "0"))
+    job_key = str(job_id)
+    await websocket.send_json({"type": "ready", "job_id": job_key, "after_event_id": after_event_id})
+    try:
+        async for event in app.state.event_hub.subscribe_from(job_key, after_event_id):
+            await websocket.send_json({"type": "progress", "event": event.model_dump(mode="json")})
+            if event.status in {QueueJobStatus.COMPLETED.value, QueueJobStatus.PARTIAL_SUCCESS.value, QueueJobStatus.FAILED.value}:
+                await websocket.close(code=1000)
+                return
+    except WebSocketDisconnect:
+        return
+
+
+@app.post(f"{settings.api_prefix}/streams", response_model=StreamCreated, status_code=status.HTTP_201_CREATED)
+async def create_stream(payload: StreamCreate) -> StreamCreated:
+    stream_id = str(uuid.uuid4())
+    app.state.streams[stream_id] = {
+        "tenant_id": "development-tenant",
+        "language": payload.language,
+        "profile": payload.profile,
+        "engine_names": tuple(payload.engine_names),
+        "chunk_count": 0,
+    }
+    return StreamCreated(stream_id=stream_id, websocket_url=f"{settings.api_prefix}/streams/{stream_id}/ws")
+
+
+@app.websocket(f"{settings.api_prefix}/streams/{{stream_id}}/ws")
+async def stream_websocket(websocket: WebSocket, stream_id: str) -> None:
+    await websocket.accept()
+    stream = app.state.streams.get(stream_id)
+    if stream is None:
+        await websocket.send_json({"type": "error", "message": "Unknown stream"})
+        await websocket.close(code=1008)
+        return
+    await websocket.send_json({"type": "ready", "stream_id": stream_id})
+    stream_dir = Path(settings.storage_root) / "streams" / stream_id
+    stream_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("bytes") is not None:
+                stream["chunk_count"] += 1
+                chunk_number = stream["chunk_count"]
+                chunk_path = stream_dir / f"chunk-{chunk_number:06d}.bin"
+                chunk_path.write_bytes(message["bytes"])
+                job = TranscriptionJob.create_stream_chunk(
+                    tenant_id=stream["tenant_id"],
+                    stream_id=stream_id,
+                    chunk_path=str(chunk_path),
+                    language=stream["language"],
+                    profile=stream["profile"],
+                    engine_names=stream["engine_names"],
+                )
+                await app.state.job_queue.enqueue(job)
+                await app.state.event_hub.publish_status(job.job_id, QueueJobStatus.TRANSCRIBING.value, 5, "Audio chunk queued")
+                await websocket.send_json({"type": "progress", "stream_id": stream_id, "chunk_number": chunk_number, "job_id": job.job_id})
+                continue
+            if message.get("text") is not None:
+                command = WebSocketClientMessage.model_validate_json(message["text"])
+                if command.type == "ping":
+                    await websocket.send_json({"type": "pong", "stream_id": stream_id})
+                elif command.type == "finalize":
+                    job = TranscriptionJob(job_id=str(uuid.uuid4()), kind=JobKind.STREAM_FINALIZE, tenant_id=stream["tenant_id"], evidence_id=None, stream_id=stream_id, language=stream["language"], profile=stream["profile"], engine_names=stream["engine_names"])
+                    await app.state.job_queue.enqueue(job)
+                    await app.state.event_hub.publish_status(job.job_id, QueueJobStatus.ALIGNING.value, 90, "Stream finalization queued")
+                    await websocket.send_json({"type": "completed", "stream_id": stream_id, "job_id": job.job_id})
+                    app.state.streams.pop(stream_id, None)
+                    await websocket.close(code=1000)
+                    return
+    except WebSocketDisconnect:
+        return
+    finally:
+        if websocket.client_state.name != "CONNECTED":
+            return
