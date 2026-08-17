@@ -31,6 +31,16 @@ Streaming chunks are persisted before enqueueing. The worker keeps only stream s
 
 Production additions required before real evidence use include retry policy, dead-letter handling, idempotency keys, stale consumer recovery, visibility timeout policy, job cancellation, durable progress events, and tenant-aware rate limits.
 
+The real integration test is `backend/tests/integration/test_redis_streams.py`. Start an isolated Redis instance and run it with:
+
+```bash
+redis-server --port 6381 --bind 127.0.0.1 --save '' --appendonly no --daemonize yes
+cd backend
+BAYENAT_TEST_REDIS_URL=redis://127.0.0.1:6381/15 python3 -m pytest -q -s -m integration tests/integration/test_redis_streams.py
+```
+
+The test publishes 48 jobs, consumes them with four distinct consumer identities, verifies every job is delivered exactly once in the successful run, checks that pending count reaches zero after explicit acknowledgments, and probes that an unacknowledged delivery remains pending until it is acknowledged.
+
 ## Failure semantics
 
 Each engine is invoked independently through `asyncio.to_thread`, so synchronous model inference does not block the event loop. A failed engine is omitted from the successful result set but must be recorded by the persistence layer. If at least one engine succeeds, the worker may emit `PARTIAL_SUCCESS`; if all fail, the job is `FAILED`. The current in-memory implementation preserves this status boundary and is ready for durable engine-run records.

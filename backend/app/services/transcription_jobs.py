@@ -82,6 +82,9 @@ class JobQueue(Protocol):
     async def dequeue(self) -> TranscriptionJob:
         ...
 
+    async def acknowledge(self, job: TranscriptionJob) -> None:
+        ...
+
 
 class InMemoryJobQueue:
     """Deterministic queue for local development and unit tests."""
@@ -111,6 +114,7 @@ class RedisJobQueue:
         self.stream_name = stream_name
         self.group_name = "bayenat-workers"
         self.consumer_name = f"worker-{uuid.uuid4()}"
+        self._delivery_ids: dict[str, str] = {}
 
     async def ensure_group(self) -> None:
         try:
@@ -130,5 +134,17 @@ class RedisJobQueue:
         _, entries = messages[0]
         message_id, fields = entries[0]
         job = TranscriptionJob.from_json(fields["job"])
-        await self._redis.xack(self.stream_name, self.group_name, message_id)
+        self._delivery_ids[job.job_id] = message_id
         return job
+
+    async def acknowledge(self, job: TranscriptionJob) -> None:
+        message_id = self._delivery_ids.pop(job.job_id, None)
+        if message_id is None:
+            raise KeyError(f"no pending delivery for job {job.job_id}")
+        acknowledged = await self._redis.xack(self.stream_name, self.group_name, message_id)
+        if acknowledged != 1:
+            raise RuntimeError(f"Redis did not acknowledge job {job.job_id}")
+
+    async def pending_count(self) -> int:
+        pending = await self._redis.xpending(self.stream_name, self.group_name)
+        return int(pending["pending"] if isinstance(pending, dict) else pending[0])
