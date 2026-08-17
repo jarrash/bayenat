@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-development"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
+    jwt_issuer: str = "bayenat-api"
+    allow_dev_principal: bool = True
+    rate_limit_requests: int = 120
+    rate_limit_window_seconds: int = 60
+    websocket_rate_limit_requests: int = 30
+    websocket_rate_limit_window_seconds: int = 60
     stt_model_name: str = "large-v3"
     stt_device: str = "cpu"
     stt_compute_type: str = "int8"

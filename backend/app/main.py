@@ -9,11 +9,13 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, We
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import Principal, get_current_principal, get_request_principal, get_websocket_principal
 from app.core.config import get_settings
 from app.db.models import ArtifactType, AuditEvent, AuditEventType, Case, Evidence, EvidenceArtifact, JobStatus, ProcessingJob, Tenant, User
 from app.db.session import get_db
 from app.schemas.api import CaseCreate, CaseRead, EvidenceRead, IntegrityRead, JobRead
 from app.schemas.transcription import JobEventRead, StreamCreate, StreamCreated, TranscriptionSubmit, WebSocketClientMessage
+from app.middleware.rate_limit import RateLimitMiddleware, SlidingWindowLimiter, websocket_client_key
 from app.services.job_events import JobEventHub
 from app.services.transcription_jobs import InMemoryJobQueue, JobKind, JobStatus as QueueJobStatus, TranscriptionJob
 from app.services.integrity import audit_event_hash, sha256_file
@@ -23,6 +25,9 @@ app = FastAPI(title=settings.app_name, version="0.1.0", description="Evidence tr
 app.state.job_queue = InMemoryJobQueue()
 app.state.event_hub = JobEventHub()
 app.state.streams = {}
+app.state.job_tenants = {}
+app.state.websocket_limiter = SlidingWindowLimiter(settings.websocket_rate_limit_requests, settings.websocket_rate_limit_window_seconds)
+app.add_middleware(RateLimitMiddleware, limit=settings.rate_limit_requests, window_seconds=settings.rate_limit_window_seconds)
 
 ALLOWED_MEDIA_TYPES = {
     "audio/wav",
@@ -37,7 +42,13 @@ ALLOWED_MEDIA_TYPES = {
 }
 
 
-def _default_principal(db: Session) -> tuple[Tenant, User]:
+def _default_principal(db: Session, principal: Principal | None = None) -> tuple[Tenant, User]:
+    if principal is not None and principal.auth_source == "jwt":
+        tenant = db.scalar(select(Tenant).where(Tenant.id == principal.tenant_id))
+        user = db.scalar(select(User).where(User.id == principal.user_id, User.tenant_id == principal.tenant_id))
+        if tenant is None or user is None:
+            raise HTTPException(status_code=401, detail="Authenticated principal not found")
+        return tenant, user
     tenant = db.scalar(select(Tenant).where(Tenant.name == "Development Tenant"))
     if tenant is None:
         tenant = Tenant(name="Development Tenant")
@@ -57,8 +68,8 @@ def health() -> dict[str, str]:
 
 
 @app.post(f"{settings.api_prefix}/cases", response_model=CaseRead, status_code=status.HTTP_201_CREATED)
-def create_case(payload: CaseCreate, db: Session = Depends(get_db)) -> Case:
-    tenant, user = _default_principal(db)
+def create_case(payload: CaseCreate, principal: Principal = Depends(get_current_principal), db: Session = Depends(get_db)) -> Case:
+    tenant, user = _default_principal(db, principal)
     case = Case(
         tenant_id=tenant.id,
         reference_number=payload.reference_number,
@@ -74,16 +85,16 @@ def create_case(payload: CaseCreate, db: Session = Depends(get_db)) -> Case:
 
 
 @app.get(f"{settings.api_prefix}/cases", response_model=list[CaseRead])
-def list_cases(db: Session = Depends(get_db)) -> list[Case]:
-    tenant, _ = _default_principal(db)
+def list_cases(principal: Principal = Depends(get_current_principal), db: Session = Depends(get_db)) -> list[Case]:
+    tenant, _ = _default_principal(db, principal)
     cases = db.scalars(select(Case).where(Case.tenant_id == tenant.id).order_by(Case.created_at.desc())).all()
     db.commit()
     return list(cases)
 
 
 @app.post(f"{settings.api_prefix}/cases/{{case_id}}/evidence", response_model=EvidenceRead, status_code=status.HTTP_201_CREATED)
-def upload_evidence(case_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)) -> Evidence:
-    tenant, _ = _default_principal(db)
+def upload_evidence(case_id: uuid.UUID, file: UploadFile = File(...), principal: Principal = Depends(get_current_principal), db: Session = Depends(get_db)) -> Evidence:
+    tenant, _ = _default_principal(db, principal)
     case = db.scalar(select(Case).where(Case.id == case_id, Case.tenant_id == tenant.id))
     if case is None:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -141,8 +152,8 @@ def upload_evidence(case_id: uuid.UUID, file: UploadFile = File(...), db: Sessio
 
 
 @app.post(f"{settings.api_prefix}/evidence/{{evidence_id}}/transcribe", response_model=JobRead, status_code=status.HTTP_202_ACCEPTED)
-async def submit_transcription(evidence_id: uuid.UUID, payload: TranscriptionSubmit | None = None, db: Session = Depends(get_db)) -> ProcessingJob:
-    tenant, _ = _default_principal(db)
+async def submit_transcription(evidence_id: uuid.UUID, payload: TranscriptionSubmit | None = None, principal: Principal = Depends(get_current_principal), db: Session = Depends(get_db)) -> ProcessingJob:
+    tenant, _ = _default_principal(db, principal)
     evidence = db.scalar(select(Evidence).where(Evidence.id == evidence_id, Evidence.tenant_id == tenant.id))
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -157,14 +168,15 @@ async def submit_transcription(evidence_id: uuid.UUID, payload: TranscriptionSub
     db.add(job)
     db.commit()
     db.refresh(job)
+    app.state.job_tenants[str(job.id)] = tenant.id
     await app.state.job_queue.enqueue(TranscriptionJob(job_id=str(job.id), kind=JobKind.BATCH, tenant_id=str(tenant.id), evidence_id=str(evidence.id), audio_path=str(Path(settings.storage_root) / evidence.storage_uri), language=request.language, profile=profile, engine_names=tuple(request.engine_names)))
     await app.state.event_hub.publish_status(str(job.id), QueueJobStatus.QUEUED.value, 0, "Transcription job queued")
     return job
 
 
 @app.get(f"{settings.api_prefix}/jobs/{{job_id}}", response_model=JobRead)
-def get_job(job_id: uuid.UUID, db: Session = Depends(get_db)) -> ProcessingJob:
-    tenant, _ = _default_principal(db)
+def get_job(job_id: uuid.UUID, principal: Principal = Depends(get_current_principal), db: Session = Depends(get_db)) -> ProcessingJob:
+    tenant, _ = _default_principal(db, principal)
     job = db.scalar(select(ProcessingJob).where(ProcessingJob.id == job_id, ProcessingJob.tenant_id == tenant.id))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -172,8 +184,8 @@ def get_job(job_id: uuid.UUID, db: Session = Depends(get_db)) -> ProcessingJob:
 
 
 @app.get(f"{settings.api_prefix}/evidence/{{evidence_id}}/integrity", response_model=IntegrityRead)
-def verify_integrity(evidence_id: uuid.UUID, db: Session = Depends(get_db)) -> IntegrityRead:
-    tenant, _ = _default_principal(db)
+def verify_integrity(evidence_id: uuid.UUID, principal: Principal = Depends(get_current_principal), db: Session = Depends(get_db)) -> IntegrityRead:
+    tenant, _ = _default_principal(db, principal)
     evidence = db.scalar(select(Evidence).where(Evidence.id == evidence_id, Evidence.tenant_id == tenant.id))
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -194,12 +206,28 @@ def verify_integrity(evidence_id: uuid.UUID, db: Session = Depends(get_db)) -> I
 
 
 @app.get(f"{settings.api_prefix}/jobs/{{job_id}}/events", response_model=list[JobEventRead])
-async def list_job_events(job_id: uuid.UUID, after_event_id: int = Query(default=0, ge=0)) -> list[JobEventRead]:
+async def list_job_events(job_id: uuid.UUID, after_event_id: int = Query(default=0, ge=0), principal: Principal = Depends(get_request_principal)) -> list[JobEventRead]:
+    tenant_id = app.state.job_tenants.get(str(job_id))
+    if tenant_id is not None and principal.auth_source != "development" and tenant_id != principal.tenant_id:
+        raise HTTPException(status_code=404, detail="Job not found")
     return await app.state.event_hub.replay(str(job_id), after_event_id)
 
 
 @app.websocket(f"{settings.api_prefix}/jobs/{{job_id}}/events/ws")
 async def job_events_websocket(websocket: WebSocket, job_id: uuid.UUID) -> None:
+    allowed, retry_after = app.state.websocket_limiter.allow(websocket_client_key(websocket))
+    if not allowed:
+        await websocket.close(code=1008, reason=f"Rate limit exceeded; retry after {retry_after}s")
+        return
+    try:
+        principal = get_websocket_principal(websocket)
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+    tenant_id = app.state.job_tenants.get(str(job_id))
+    if tenant_id is not None and principal.auth_source != "development" and tenant_id != principal.tenant_id:
+        await websocket.close(code=1008, reason="Resource not found")
+        return
     await websocket.accept()
     after_event_id = int(websocket.query_params.get("after_event_id", "0"))
     job_key = str(job_id)
@@ -215,10 +243,10 @@ async def job_events_websocket(websocket: WebSocket, job_id: uuid.UUID) -> None:
 
 
 @app.post(f"{settings.api_prefix}/streams", response_model=StreamCreated, status_code=status.HTTP_201_CREATED)
-async def create_stream(payload: StreamCreate) -> StreamCreated:
+async def create_stream(payload: StreamCreate, principal: Principal = Depends(get_request_principal)) -> StreamCreated:
     stream_id = str(uuid.uuid4())
     app.state.streams[stream_id] = {
-        "tenant_id": "development-tenant",
+        "tenant_id": str(principal.tenant_id),
         "language": payload.language,
         "profile": payload.profile,
         "engine_names": tuple(payload.engine_names),
@@ -229,12 +257,20 @@ async def create_stream(payload: StreamCreate) -> StreamCreated:
 
 @app.websocket(f"{settings.api_prefix}/streams/{{stream_id}}/ws")
 async def stream_websocket(websocket: WebSocket, stream_id: str) -> None:
-    await websocket.accept()
-    stream = app.state.streams.get(stream_id)
-    if stream is None:
-        await websocket.send_json({"type": "error", "message": "Unknown stream"})
-        await websocket.close(code=1008)
+    allowed, retry_after = app.state.websocket_limiter.allow(websocket_client_key(websocket))
+    if not allowed:
+        await websocket.close(code=1008, reason=f"Rate limit exceeded; retry after {retry_after}s")
         return
+    try:
+        principal = get_websocket_principal(websocket)
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+    stream = app.state.streams.get(stream_id)
+    if stream is None or (principal.auth_source != "development" and stream["tenant_id"] != str(principal.tenant_id)):
+        await websocket.close(code=1008, reason="Resource not found")
+        return
+    await websocket.accept()
     await websocket.send_json({"type": "ready", "stream_id": stream_id})
     stream_dir = Path(settings.storage_root) / "streams" / stream_id
     stream_dir.mkdir(parents=True, exist_ok=True)
